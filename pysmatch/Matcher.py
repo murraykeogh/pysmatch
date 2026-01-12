@@ -290,7 +290,7 @@ class Matcher:
             logging.error(f"Ensure covariates in self.X are numeric or appropriately preprocessed for model_type='{self.model_type}'.")
 
 
-def match(self, threshold: float = 0.001, nmatches: int = 1, method: str = 'min',
+    def match(self, threshold: float = 0.001, nmatches: int = 1, method: str = 'min',
           replacement: bool = False, exhaustive_matching: Optional[bool] = None,
           sort_by: Union[str, None] = None, round_scores: bool = False) -> None:
         """
