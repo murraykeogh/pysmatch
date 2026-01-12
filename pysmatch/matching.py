@@ -73,16 +73,16 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
     # Sort by scores and optionally by sort_by column
     if sort_by is not None:
     # Ensure sort_by column exists in both dataframes
-    if sort_by in test_df.columns and sort_by in ctrl_df.columns:
+      if sort_by in test_df.columns and sort_by in ctrl_df.columns:
         test_scores = test_df[['index', 'scores', sort_by]].sort_values(['scores', sort_by]).reset_index(drop=True)
         ctrl_scores = ctrl_df[['index', 'scores', sort_by]].sort_values(['scores', sort_by]).reset_index(drop=True)
-    else:
+      else:
         logging.warning(f"Column '{sort_by}' not found in test or control data. Sorting by scores only.")
         test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
         ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
-else:
-    test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
-    ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
+    else:
+      test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
+      ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
 
     test_indices = test_scores['index'].values
     test_scores_values = test_scores['scores'].values.reshape(-1, 1)
