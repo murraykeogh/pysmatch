@@ -349,11 +349,6 @@ class Matcher:
             control_usage_counts = defaultdict(int)
             matched_pairs_info = []
 
-            if sort_by is not None:
-                logging.warning(f"sort_by='{sort_by}' parameter is ignored when exhaustive_matching=True")
-            if round_scores:
-                logging.warning(f"round_scores={round_scores} parameter is ignored when exhaustive_matching=True")
-
             if 'record_id' not in current_test_df.columns or 'record_id' not in current_control_df.columns:
                 logging.error("Record IDs missing from test_df or control_df used in exhaustive matching.")
                 self.matched_data = pd.DataFrame()
@@ -431,10 +426,6 @@ class Matcher:
 
         else:
             logging.info(f"Performing matching using pysmatch.matching.perform_match: method='{method}', replacement={replacement}, threshold={threshold}, nmatches={nmatches}")
-            if sort_by is not None:
-                    logging.info(f"Sorting by column: '{sort_by}'")
-            if round_scores:
-                    logging.info(f"Rounding scores to 1 decimal place")
             if 'scores' not in self.data.columns or 'record_id' not in self.data.columns or self.treatment_col not in self.data.columns:
                 logging.error("self.data is missing required columns for standard matching. Aborting.")
                 self.matched_data = pd.DataFrame()
