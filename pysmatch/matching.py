@@ -59,11 +59,6 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
         logging.error("No 'scores' column found. Please run predict_scores() first.")
         raise ValueError("Scores column not found in data.")
     
-    # Validate sort_by column if provided
-    if sort_by is not None and sort_by not in data.columns:
-        logging.error(f"Column '{sort_by}' not found in data.")
-        raise ValueError(f"sort_by column '{sort_by}' not found in data.")
-    
     # Create a working copy of the data
     working_data = data.copy()
     
