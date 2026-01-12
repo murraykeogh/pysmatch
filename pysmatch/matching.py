@@ -7,7 +7,8 @@ from sklearn.neighbors import NearestNeighbors
 from typing import Union
 
 def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
-                  nmatches: int = 1, method: str = 'min', replacement: bool = False) -> pd.DataFrame:
+                  nmatches: int = 1, method: str = 'min', replacement: bool = False,
+                  sort_by: Union[str, None] = None, round_scores: bool = False) -> pd.DataFrame:
     """
     Performs nearest neighbor matching based on propensity scores within a radius.
 
@@ -36,6 +37,12 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
                                 Defaults to 'min'.
         replacement (bool, optional): Whether control units can be matched multiple times
                                       (used more than once as a match). Defaults to False.
+        sort_by (Union[str, None], optional): Column name to sort by before matching.
+                                              If provided, both test and control groups will
+                                              be sorted by this column (in addition to scores).
+                                              Defaults to None.
+        round_scores (bool, optional): Whether to round propensity scores to one decimal place
+                                       (e.g., 0.887 becomes 0.9) before matching. Defaults to False.
 
     Returns:
         pd.DataFrame: A DataFrame containing the matched test and control units.
@@ -46,17 +53,35 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
     Raises:
         ValueError: If the 'scores' column is not found in the input `data`.
         ValueError: If an invalid `method` parameter is provided (not 'min' or 'random').
+        ValueError: If `sort_by` column is not found in the input `data`.
     """
     if 'scores' not in data.columns:
         logging.error("No 'scores' column found. Please run predict_scores() first.")
         raise ValueError("Scores column not found in data.")
+    
+    # Validate sort_by column if provided
+    if sort_by is not None and sort_by not in data.columns:
+        logging.error(f"Column '{sort_by}' not found in data.")
+        raise ValueError(f"sort_by column '{sort_by}' not found in data.")
+    
+    # Create a working copy of the data
+    working_data = data.copy()
+    
+    # Round scores if requested
+    if round_scores:
+        working_data['scores'] = working_data['scores'].round(1)
 
     # 对测试组和对照组按倾向分数排序
-    test_df = data[data[yvar] == 1].copy().reset_index()
-    ctrl_df = data[data[yvar] == 0].copy().reset_index()
+    test_df = working_data[working_data[yvar] == 1].copy().reset_index()
+    ctrl_df = working_data[working_data[yvar] == 0].copy().reset_index()
 
-    test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
-    ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
+    # Sort by scores and optionally by sort_by column
+    if sort_by is not None:
+        test_scores = test_df[['index', 'scores', sort_by]].sort_values(['scores', sort_by]).reset_index(drop=True)
+        ctrl_scores = ctrl_df[['index', 'scores', sort_by]].sort_values(['scores', sort_by]).reset_index(drop=True)
+    else:
+        test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
+        ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
 
     test_indices = test_scores['index'].values
     test_scores_values = test_scores['scores'].values.reshape(-1, 1)

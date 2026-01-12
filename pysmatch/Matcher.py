@@ -4,7 +4,7 @@ import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from collections import defaultdict
 from tqdm import tqdm
 
@@ -290,8 +290,9 @@ class Matcher:
             logging.error(f"Ensure covariates in self.X are numeric or appropriately preprocessed for model_type='{self.model_type}'.")
 
 
-    def match(self, threshold: float = 0.001, nmatches: int = 1, method: str = 'min',
-              replacement: bool = False, exhaustive_matching: Optional[bool] = None) -> None:
+def match(self, threshold: float = 0.001, nmatches: int = 1, method: str = 'min',
+          replacement: bool = False, exhaustive_matching: Optional[bool] = None,
+          sort_by: Union[str, None] = None, round_scores: bool = False) -> None:
         """
         Performs matching based on estimated propensity scores.
 
@@ -307,6 +308,12 @@ class Matcher:
                                                             by prioritizing unused or less-used controls.
                                                             If None, uses the instance's default
                                                             `self.exhaustive_matching_default`. Defaults to None.
+            sort_by (Union[str, None], optional): Column name to sort by before matching (only used when
+                                              exhaustive_matching is False). Passed to `pysmatch.matching.perform_match`.
+                                              Defaults to None.
+            round_scores (bool, optional): Whether to round propensity scores to one decimal place before matching
+                                       (only used when exhaustive_matching is False). Passed to `pysmatch.matching.perform_match`.
+                                       Defaults to False.
         """
         if exhaustive_matching is None:
             exhaustive_matching = self.exhaustive_matching_default
@@ -341,6 +348,11 @@ class Matcher:
             logging.info(f"Performing exhaustive matching: nmatches={nmatches}, threshold={threshold}")
             control_usage_counts = defaultdict(int)
             matched_pairs_info = []
+
+            if sort_by is not None:
+                logging.warning(f"sort_by='{sort_by}' parameter is ignored when exhaustive_matching=True")
+            if round_scores:
+                logging.warning(f"round_scores={round_scores} parameter is ignored when exhaustive_matching=True")
 
             if 'record_id' not in current_test_df.columns or 'record_id' not in current_control_df.columns:
                 logging.error("Record IDs missing from test_df or control_df used in exhaustive matching.")
@@ -419,9 +431,14 @@ class Matcher:
 
         else:
             logging.info(f"Performing matching using pysmatch.matching.perform_match: method='{method}', replacement={replacement}, threshold={threshold}, nmatches={nmatches}")
+            if sort_by is not None:
+                    logging.info(f"Sorting by column: '{sort_by}'")
+            if round_scores:
+                    logging.info(f"Rounding scores to 1 decimal place")
             if 'scores' not in self.data.columns or 'record_id' not in self.data.columns or self.treatment_col not in self.data.columns:
                 logging.error("self.data is missing required columns for standard matching. Aborting.")
                 self.matched_data = pd.DataFrame()
+
                 return
 
             self.matched_data = matching.perform_match(
@@ -430,8 +447,11 @@ class Matcher:
                 threshold=threshold,
                 nmatches=nmatches,
                 method=method,
-                replacement=replacement
+                replacement=replacement,
+                sort_by=sort_by,
+                round_scores=round_scores
             )
+            
             if self.matched_data.empty:
                 logging.info("No matches found using pysmatch.matching.perform_match.")
             else:
