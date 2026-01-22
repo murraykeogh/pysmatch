@@ -8,7 +8,7 @@ from typing import Union
 
 def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
                   nmatches: int = 1, method: str = 'min', replacement: bool = False,
-                  sort_by: Union[str, None] = None, round_scores: bool = False, round_value: integer = 1) -> pd.DataFrame:
+                  sort_by: Union[str, None] = None, round_scores: bool = False, round_value: int = 1) -> pd.DataFrame:
     """
     Performs nearest neighbor matching based on propensity scores within a radius.
 
