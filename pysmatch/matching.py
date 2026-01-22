@@ -101,7 +101,7 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
         if len(neighbors) == 0:
             continue
         if method == 'min':
-            sorted_order = np.argsort(dists)
+            sorted_order = np.lexsort((neighbors, dists))
             selected = []
             for idx in sorted_order:
                 ctrl_idx = ctrl_indices[neighbors[idx]]
