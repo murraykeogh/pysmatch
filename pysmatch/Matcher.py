@@ -440,7 +440,8 @@ class Matcher:
                 method=method,
                 replacement=replacement,
                 sort_by=sort_by,
-                round_scores=round_scores
+                round_scores=round_scores,
+                round_value=round_value
             )
             
             if self.matched_data.empty:
