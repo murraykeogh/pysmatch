@@ -292,7 +292,7 @@ class Matcher:
 
     def match(self, threshold: float = 0.001, nmatches: int = 1, method: str = 'min',
           replacement: bool = False, exhaustive_matching: Optional[bool] = None,
-          sort_by: Union[str, None] = None, round_scores: bool = False) -> None:
+          sort_by: Union[str, None] = None, round_scores: bool = False, round_value: int =1) -> None:
         """
         Performs matching based on estimated propensity scores.
 
