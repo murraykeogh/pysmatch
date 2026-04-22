@@ -9,80 +9,40 @@ from typing import Union
 def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
                   nmatches: int = 1, method: str = 'min', replacement: bool = False,
                   sort_by: Union[str, None] = None, round_scores: bool = False, round_value: int = 1) -> pd.DataFrame:
-    """
-    Performs nearest neighbor matching based on propensity scores within a radius.
 
-    Finds suitable match(es) from the control group for each record in the test
-    (treatment) group based on propensity scores ('scores' column). It uses
-    `sklearn.neighbors.NearestNeighbors` with `radius=threshold` to find potential
-    neighbors and then applies selection logic based on the `method` parameter
-    ('min' or 'random') to choose up to `nmatches`.
-
-    Args:
-        data (pd.DataFrame): DataFrame containing both test and control groups,
-                             must include the `yvar` column and a 'scores' column
-                             with propensity scores.
-        yvar (str): The name of the binary column indicating group membership (0 or 1).
-        threshold (float, optional): The radius within which to search for neighbors
-                                     based on propensity score difference. Defaults to 0.001.
-        nmatches (int, optional): The maximum number of control matches to find for
-                                  each test unit within the specified radius/threshold.
-                                  Defaults to 1.
-        method (str, optional): The method for selecting matches among neighbors found
-                                within the radius. Options:
-                                'min': Selects the `nmatches` neighbors with the smallest
-                                       score difference.
-                                'random': Selects `nmatches` neighbors randomly from those
-                                          within the radius.
-                                Defaults to 'min'.
-        replacement (bool, optional): Whether control units can be matched multiple times
-                                      (used more than once as a match). Defaults to False.
-        sort_by (Union[str, None], optional): Column name to sort by before matching.
-                                              If provided, both test and control groups will
-                                              be sorted by this column (in addition to scores).
-                                              Defaults to None.
-        round_scores (bool, optional): Whether to round propensity scores to one decimal place
-                                       (e.g., 0.887 becomes 0.9) before matching. Defaults to False.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the matched test and control units.
-                      Includes original columns plus 'match_id' (linking matched pairs/groups)
-                      and 'record_id' (preserving the original index of the unit). Returns
-                      an empty DataFrame if no matches are found.
-
-    Raises:
-        ValueError: If the 'scores' column is not found in the input `data`.
-        ValueError: If an invalid `method` parameter is provided (not 'min' or 'random').
-        ValueError: If `sort_by` column is not found in the input `data`.
-    """
     if 'scores' not in data.columns:
         logging.error("No 'scores' column found. Please run predict_scores() first.")
         raise ValueError("Scores column not found in data.")
     
-    # Create a working copy of the data
+    if sort_by is not None and sort_by not in data.columns:
+        raise ValueError(f"Column '{sort_by}' not found in data.")
+
     working_data = data.copy()
     
-    # Round scores if requested
-    if round_scores:
-        working_data['scores'] = working_data['scores'].round(round_value)
+    factor = 10 ** round_value
+    working_data['scores'] = (working_data['scores'] * factor).round().astype(int) / factor
 
-    # 对测试组和对照组按倾向分数排序
     test_df = working_data[working_data[yvar] == 1].copy().reset_index()
     ctrl_df = working_data[working_data[yvar] == 0].copy().reset_index()
 
-    # Sort by scores and optionally by sort_by column
-    if sort_by is not None:
-    # Ensure sort_by column exists in both dataframes
-      if sort_by in test_df.columns and sort_by in ctrl_df.columns:
-        test_scores = test_df[['index', 'scores', sort_by]].sort_values(['scores', sort_by]).reset_index(drop=True)
-        ctrl_scores = ctrl_df[['index', 'scores', sort_by]].sort_values(['scores', sort_by]).reset_index(drop=True)
-      else:
-        logging.warning(f"Column '{sort_by}' not found in test or control data. Sorting by scores only.")
-        test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
-        ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
+    if sort_by is not None and sort_by in test_df.columns and sort_by in ctrl_df.columns:
+        test_scores = (test_df[['index', 'scores', sort_by]]
+                       .sort_values(['scores', sort_by], ascending=[True, True])
+                       .reset_index(drop=True))
+        ctrl_scores = (ctrl_df[['index', 'scores', sort_by]]
+                       .sort_values(['scores', sort_by], ascending=[True, True])
+                       .reset_index(drop=True))
+        ctrl_sort_values = ctrl_scores[sort_by].values  # used for explicit tiebreaking
     else:
-      test_scores = test_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
-      ctrl_scores = ctrl_df[['index', 'scores']].sort_values('scores').reset_index(drop=True)
+        if sort_by is not None:
+            logging.warning(f"Column '{sort_by}' not found in test or control data. Sorting by scores only.")
+        test_scores = (test_df[['index', 'scores']]
+                       .sort_values('scores')
+                       .reset_index(drop=True))
+        ctrl_scores = (ctrl_df[['index', 'scores']]
+                       .sort_values('scores')
+                       .reset_index(drop=True))
+        ctrl_sort_values = None
 
     test_indices = test_scores['index'].values
     test_scores_values = test_scores['scores'].values.reshape(-1, 1)
@@ -100,8 +60,15 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
     for i, (dists, neighbors) in enumerate(zip(distances, indices)):
         if len(neighbors) == 0:
             continue
+
         if method == 'min':
-            sorted_order = np.lexsort((neighbors, dists))
+            # Explicitly tiebreak by sort_by values when distances are equal
+            if ctrl_sort_values is not None:
+                neighbor_sort_vals = np.array([ctrl_sort_values[n] for n in neighbors])
+                sorted_order = np.lexsort((neighbor_sort_vals, dists))
+            else:
+                sorted_order = np.lexsort((neighbors, dists))
+
             selected = []
             for idx in sorted_order:
                 ctrl_idx = ctrl_indices[neighbors[idx]]
@@ -112,6 +79,7 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
                     used_ctrl_indices.add(ctrl_idx)
                 if len(selected) == nmatches:
                     break
+
             if selected:
                 for ctrl_idx in selected:
                     matched_records.append({
@@ -120,6 +88,7 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
                         'match_id': current_match_id
                     })
                 current_match_id += 1
+
         elif method == 'random':
             possible = list(neighbors)
             if not replacement:
@@ -144,12 +113,10 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
         matched_df = pd.DataFrame(matched_records)
         matched_test = data.loc[matched_df['test_index']].copy()
         matched_ctrl = data.loc[matched_df['control_index']].copy()
-
         matched_test['match_id'] = matched_df['match_id'].values
         matched_ctrl['match_id'] = matched_df['match_id'].values
         matched_test['record_id'] = matched_test.index
         matched_ctrl['record_id'] = matched_ctrl.index
-
         output_df = pd.concat([matched_test, matched_ctrl], ignore_index=True)
     else:
         output_df = pd.DataFrame(columns=list(data.columns) + ['match_id', 'record_id'])
