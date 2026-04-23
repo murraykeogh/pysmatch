@@ -19,13 +19,8 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
 
     working_data = data.copy()
     
-    if round_scores:
-        if round_value is None:
-            raise ValueError("round_value cannot be None when round_scores is True.")
-        if round_value not in range(1, 5):
-            raise ValueError("round_value must be between 1 and 4.")
-        factor = 10 ** round_value
-        working_data['scores'] = (working_data['scores'] * factor).round().astype(int) / factor
+    factor = 10 ** round_value
+    working_data['scores'] = (working_data['scores'] * factor).round().astype(int) / factor
 
     test_df = working_data[working_data[yvar] == 1].copy().reset_index()
     ctrl_df = working_data[working_data[yvar] == 0].copy().reset_index()
