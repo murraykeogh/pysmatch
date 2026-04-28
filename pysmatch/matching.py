@@ -19,7 +19,7 @@ def perform_match(data: pd.DataFrame, yvar: str, threshold: float = 0.001,
 
     working_data = data.copy()
     
-    if round_scores
+    if round_scores:
         factor = 10 ** round_value
         working_data['scores'] = (working_data['scores'] * factor).round().astype(int) / factor
 
