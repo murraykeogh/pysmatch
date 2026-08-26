@@ -4,7 +4,7 @@ import logging
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Sequence, Union
 from collections import defaultdict
 from tqdm import tqdm
 
@@ -292,9 +292,16 @@ class Matcher:
 
     def match(self, threshold: float = 0.001, nmatches: int = 1, method: str = 'min',
           replacement: bool = False, exhaustive_matching: Optional[bool] = None,
-          sort_by: Union[str, None] = None, round_scores: bool = False, round_value: int =1) -> None:
+          sort_by: Union[str, None] = None, round_scores: bool = False, round_value: int = 1,
+          exact_match_cols: Optional[Sequence[str]] = None,
+          range_cols: Optional[Dict[str, matching.RangeSpec]] = None) -> None:
         """
         Performs matching based on estimated propensity scores.
+
+        In addition to the propensity score caliper, the pool of controls considered for
+        each treated unit can be restricted with `exact_match_cols` (identical values
+        required) and `range_cols` (values required to fall inside a window around the
+        treated unit's value). Both apply to exhaustive and standard matching.
 
         Args:
             threshold (float, optional): Threshold for score difference. Defaults to 0.001.
@@ -314,9 +321,29 @@ class Matcher:
             round_scores (bool, optional): Whether to round propensity scores to one decimal place before matching
                                        (only used when exhaustive_matching is False). Passed to `pysmatch.matching.perform_match`.
                                        Defaults to False.
+            exact_match_cols (Optional[Sequence[str]], optional): Columns on which a control must have
+                                       exactly the same value as the treated unit (e.g. ['sex', 'state']).
+                                       Defaults to None.
+            range_cols (Optional[Dict[str, RangeSpec]], optional): Columns on which a control's value must
+                                       fall inside a window around the treated unit's value. Each value is
+                                       either a scalar half-width (``{'age': 5}`` -> +/- 5), a
+                                       (lower_offset, upper_offset) pair (``{'age': (-2, 5)}``), or a
+                                       percentage string (``{'income': '10%'}``). Defaults to None.
         """
         if exhaustive_matching is None:
             exhaustive_matching = self.exhaustive_matching_default
+
+        exact_cols = list(exact_match_cols) if exact_match_cols else []
+        missing_exact = [col for col in exact_cols if col not in self.data.columns]
+        if missing_exact:
+            raise ValueError(f"exact_match_cols not found in data: {missing_exact}")
+        parsed_ranges = {}
+        for col, spec in (range_cols or {}).items():
+            if col not in self.data.columns:
+                raise ValueError(f"range_cols column '{col}' not found in data.")
+            if not pd.api.types.is_numeric_dtype(self.data[col]):
+                raise ValueError(f"range_cols column '{col}' must be numeric to define a range.")
+            parsed_ranges[col] = matching._parse_range_spec(col, spec)
 
         if 'scores' not in self.data.columns:
             logging.error("Propensity scores ('scores' column) not found in self.data. "
@@ -354,11 +381,46 @@ class Matcher:
                 self.matched_data = pd.DataFrame()
                 return
 
+            missing_cols = [col for col in exact_cols + list(parsed_ranges)
+                            if col not in current_test_df.columns or col not in current_control_df.columns]
+            if missing_cols:
+                logging.error(f"Columns {missing_cols} required for exact/range matching are missing from the "
+                              f"internal test/control DataFrames (they may have been excluded). Aborting.")
+                self.matched_data = pd.DataFrame()
+                return
+
+            if exact_cols:
+                dropped_cases = current_test_df[exact_cols].isna().any(axis=1)
+                dropped_controls = current_control_df[exact_cols].isna().any(axis=1)
+                if dropped_cases.any() or dropped_controls.any():
+                    logging.warning(f"Dropping {int(dropped_cases.sum())} cases and "
+                                    f"{int(dropped_controls.sum())} controls with missing values in "
+                                    f"exact_match_cols {exact_cols}.")
+                    current_test_df = current_test_df[~dropped_cases]
+                    current_control_df = current_control_df[~dropped_controls]
+
             for _, case_row in tqdm(current_test_df.iterrows(), total=len(current_test_df), desc="Exhaustive Matching"):
                 case_prop_score = case_row['scores']
                 case_record_id = case_row['record_id']
 
-                temp_controls_df = current_control_df.copy()
+                temp_controls_df = current_control_df
+                eligible_mask = pd.Series(True, index=temp_controls_df.index)
+
+                for col in exact_cols:
+                    eligible_mask &= temp_controls_df[col] == case_row[col]
+
+                for col, (kind, lower, upper) in parsed_ranges.items():
+                    case_value = case_row[col]
+                    if pd.isna(case_value):
+                        eligible_mask &= False
+                        break
+                    low, high = matching._range_bounds(kind, lower, upper, case_value)
+                    eligible_mask &= temp_controls_df[col].between(low, high)
+
+                if not eligible_mask.any():
+                    continue
+
+                temp_controls_df = temp_controls_df[eligible_mask].copy()
                 temp_controls_df['prop_score_diff'] = np.abs(temp_controls_df['scores'] - case_prop_score)
 
                 eligible_controls_for_case = temp_controls_df[temp_controls_df['prop_score_diff'] <= threshold]
@@ -441,7 +503,9 @@ class Matcher:
                 replacement=replacement,
                 sort_by=sort_by,
                 round_scores=round_scores,
-                round_value=round_value
+                round_value=round_value,
+                exact_match_cols=exact_cols or None,
+                range_cols=range_cols
             )
             
             if self.matched_data.empty:
@@ -467,7 +531,9 @@ class Matcher:
                                   test_color=self.test_color)
 
     def tune_threshold(self, method: str, nmatches: int = 1,
-                       rng: Optional[np.ndarray] = None) -> None:
+                       rng: Optional[np.ndarray] = None,
+                       exact_match_cols: Optional[Sequence[str]] = None,
+                       range_cols: Optional[Dict[str, matching.RangeSpec]] = None) -> None:
         """
         Evaluates matching retention across a range of threshold values.
 
@@ -475,6 +541,11 @@ class Matcher:
             method (str): Matching method ('min', 'nn', 'radius') for evaluation.
             nmatches (int, optional): Number of matches for 'nn'/'min'. Defaults to 1.
             rng (Optional[np.ndarray], optional): Threshold values to test. Defaults to np.arange(0, 0.001, 0.0001).
+            exact_match_cols (Optional[Sequence[str]], optional): Columns requiring an exact match, so the
+                                                                  retention curve reflects the same restrictions
+                                                                  used in `match()`. Defaults to None.
+            range_cols (Optional[Dict[str, RangeSpec]], optional): Range restrictions applied during evaluation.
+                                                                   Defaults to None.
         """
         if 'scores' not in self.data.columns:
             logging.warning("Scores not available. Cannot tune threshold. Run predict_scores() first.")
@@ -483,7 +554,9 @@ class Matcher:
             rng = np.arange(0, 0.0011, 0.0001)
 
         thresholds, retained = matching.tune_threshold(self.data, self.treatment_col,
-                                                       method=method, nmatches=nmatches, rng=rng)
+                                                       method=method, nmatches=nmatches, rng=rng,
+                                                       exact_match_cols=exact_match_cols,
+                                                       range_cols=range_cols)
         plt.figure(figsize=(10,6))
         plt.plot(thresholds, retained, marker='o')
         plt.title("Proportion of Minority Group Retained for Threshold Grid")

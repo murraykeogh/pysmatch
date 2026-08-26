@@ -337,6 +337,53 @@ This command will execute the matching process using the minimum difference stra
 
 ​	•   **replacement**: Whether to allow replacement in the matching process.
 
+​	•   **exact_match_cols**: Columns on which a control must have exactly the same value as the treated unit.
+
+​	•   **range_cols**: Columns on which a control's value must fall inside a window around the treated unit's value.
+
+
+### **Exact Matching and Range Restrictions**
+
+The propensity score threshold controls how similar two units are *overall*. Sometimes you also need hard
+constraints on individual variables — a match must be the same sex, or within five years of age. Two
+parameters narrow the pool of admissible controls for each treated unit:
+
+```python
+m.match(
+    method="min",
+    nmatches=1,
+    threshold=0.0001,
+    exact_match_cols=["sex", "state"],       # must match exactly
+    range_cols={"age": 5, "income": "10%"},  # must fall within a range
+)
+```
+
+**exact_match_cols** takes a list of column names. Matching is performed independently within each stratum
+of these columns, so a control is never paired with a treated unit from a different stratum. Rows with
+missing values in any of these columns are dropped from matching (equality cannot be established), and
+treated units in strata with no available controls stay unmatched.
+
+**range_cols** takes a dict mapping a numeric column to its allowed window around the treated unit's value:
+
+| Spec | Meaning |
+| --- | --- |
+| `{"age": 5}` | control age in `[case_age - 5, case_age + 5]` |
+| `{"age": (-2, 5)}` | offsets added to the case value: `[case_age - 2, case_age + 5]` |
+| `{"income": "10%"}` | control income within ±10% of the case income |
+
+Controls with a missing value in a range column are never eligible. Both parameters work with
+`method="min"` and `method="random"`, with and without `replacement`, and under `exhaustive_matching`.
+They are also accepted by `tune_threshold`, so the retention curve reflects the same restrictions you
+intend to use for matching:
+
+```python
+m.tune_threshold(method='min', exact_match_cols=["sex"], range_cols={"age": 5})
+```
+
+Because these are hard constraints, tightening them reduces the number of matched pairs. Check
+`prop_retained` (or the `tune_threshold` plot) after adding them to confirm you retain enough of the
+treated group.
+
 
 ## **Plotting Propensity Scores After Matching**
 ```python
